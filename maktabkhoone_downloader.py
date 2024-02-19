@@ -2,19 +2,20 @@ import sys
 import os
 import argparse
 import requests
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.chrome.options import Options
-from PyQt5.QtWidgets import QApplication, QMainWindow, QLabel, QLineEdit, QPushButton, QVBoxLayout, QWidget, QFileDialog
+from PyQt5.QtWidgets import QApplication, QMainWindow, QLabel, QLineEdit, QPushButton, QVBoxLayout, QWidget, QFileDialog, QProgressDialog
 from PyQt5.QtGui import QPixmap
-from PyQt5.QtCore import Qt 
+from PyQt5.QtCore import Qt, QThread, pyqtSignal
 
 class VideoDownloaderGUI(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Maktabkhoone Video Downloader")
         self.setGeometry(100, 100, 600, 400)
-
         self.default_download_path = os.path.expanduser("~")
 
         self.initUI()
@@ -65,34 +66,77 @@ class VideoDownloaderGUI(QMainWindow):
     def browse(self):
         download_path = QFileDialog.getExistingDirectory(self, "Select Download Path", self.default_download_path)
         if download_path:
-            self.download_path_input.setText(download_path)
+            self.download_path_input.setText(download_path)  
 
     def download(self):
+
+        # self.progress_dialog = QProgressDialog("Downloading...", "Cancel", 0, 100, self)
+        # self.progress_dialog.setWindowModality(Qt.WindowModal)
+        # self.progress_dialog.setWindowTitle("Downloading")
+        # self.progress_dialog.setAutoClose(True)
+        # self.progress_dialog.show()
+    
         chrome_options = Options()
-        chrome_options.add_argument("--headless")
-        chrome_options.add_argument("--disable-gpu")
+        # chrome_options.add_argument("--headless")
+        # chrome_options.add_argument("--disable-gpu")
 
         driver = webdriver.Chrome(options=chrome_options)  
-        driver.get(self.url_input.text()) 
+        driver.get(self.url_input.text())
 
-        episodes = driver.find_elements(By.TAG_NAME, "li")
+        WebDriverWait(driver, 15).until(lambda driver: driver.execute_script('return document.readyState') == 'complete')
 
-        for episode in episodes:
-            episode_url = episode.find_element(By.TAG_NAME, "a").get_attribute("href")
-            print("Episode URL:", episode_url)
+        WebDriverWait(driver, 15).until(
+            EC.visibility_of_element_located((By.ID, "login"))
+        )
 
-            driver.get(episode_url)
+        driver.find_element(By.ID,"login").click()
 
-            video_element = driver.find_element(By.TAG_NAME, "video")
+        WebDriverWait(driver, 15).until(
+            EC.visibility_of_element_located((By.ID, "tessera"))
+        )
 
-            video_source = video_element.get_attribute("src")
+        driver.find_element(By.ID,"tessera").send_keys(self.username_input.text())
+        driver.find_element(By.CSS_SELECTOR,"button[data-tag='ga-email-phone-login']").click()
+
+        WebDriverWait(driver, 15).until(
+            EC.visibility_of_element_located((By.ID, "password"))
+        )
+
+        driver.find_element(By.ID,"password").send_keys(self.password_input.text())
+        driver.find_element(By.CSS_SELECTOR,"button[data-tag='ga-password-submit']").click()
+
+        WebDriverWait(driver, 15).until(
+            EC.visibility_of_element_located((By.CLASS_NAME, "base-chapter__section"))
+        )
+
+        episodesATag = driver.find_element(By.CLASS_NAME,"base-chapter__section").find_elements(By.TAG_NAME,"a")
+
+        episodesUrl = []
+
+        for episode in episodesATag:
+            href = episode.get_attribute("href")
+            if href:
+                episodesUrl.append(href)
+
+        for episodeUrl in episodesUrl:
+
+            print("Episode URL:", episodeUrl)
+
+            driver.get(episodeUrl)
+
+            WebDriverWait(driver, 15).until(lambda driver: driver.execute_script('return document.readyState') == 'complete')
+
+            video_source = driver.find_element(By.CSS_SELECTOR, "meta[property='og:video']").get_attribute("content")
+
             print("Video Source:", video_source)
 
             self.download_video(video_source)
 
-        driver.quit()
+        # self.progress_dialog.hide()
+        # driver.quit()
 
     def download_video(self, video_url):
+        print("video_url : ",video_url)
         download_path = os.path.join(self.download_path_input.text(), "videos")
         os.makedirs(download_path, exist_ok=True)
 
@@ -106,6 +150,11 @@ class VideoDownloaderGUI(QMainWindow):
         else:
             print("Failed to download video.")
 
+    def update_progress(self, value):
+        self.progress_dialog.setValue(value)
+
+    def download_finished(self):
+        self.progress_dialog.close()
 
 def parse_arguments():
     parser = argparse.ArgumentParser(description="Maktabkhoone Video Downloader")
